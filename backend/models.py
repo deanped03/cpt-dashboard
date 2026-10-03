@@ -126,6 +126,32 @@ class BenchmarkImportResponse(BaseModel):
 
 
 # ──────────────────────────────────────────────
+# Superseded intermediary_rates row deletion (2026-09-30)
+# Added for the Provider Rate Overrides merge: /intermediaries/import is a
+# pure upsert and never deletes, so a combo's old blank/COMMON row has to
+# be removed explicitly once an override replaces it with per-provider
+# rows. Explicit full-key list only -- never a broad/pattern delete.
+# ──────────────────────────────────────────────
+
+class SupersededRateKey(BaseModel):
+    intermediary_name: str
+    payer_name: str
+    cpt_code: str
+    state: str
+    provider: Optional[str] = None   # None/omitted = the COMMON row (provider IS NULL)
+
+
+class DeleteSupersededRequest(BaseModel):
+    keys: list[SupersededRateKey]
+
+
+class DeleteSupersededResponse(BaseModel):
+    deleted: int
+    not_found: int
+    errors: list[str]
+
+
+# ──────────────────────────────────────────────
 # Negotiation Dashboard
 # ──────────────────────────────────────────────
 

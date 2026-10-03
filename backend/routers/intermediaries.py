@@ -17,6 +17,7 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from ..database import get_db
+from ..models import DeleteSupersededRequest, DeleteSupersededResponse
 
 router = APIRouter(prefix="/api", tags=["Intermediaries"])
 
@@ -209,11 +210,113 @@ async def import_rates(file: UploadFile = File(...),
     }
 
 
+# ── Raw row lookup (added 2026-10-01) ──────────────────────────
+# No existing endpoint lets you look at raw intermediary_rates rows by
+# payer_name -- channel-comparison joins through payers/cpt_codes and
+# won't surface an orphaned/unmapped payer_name like "OPTUM" at all, by
+# design. Added for debugging and one-off cleanup scripts (see
+# cleanup_orphaned_optum_rows.py), which need to find exactly which rows
+# a payer_name typo created before they can be removed. Deliberately
+# exact-match only on every filter, no substring/fuzzy search, so a
+# caller can't accidentally pull back more than it asked for.
+
+@router.get("/intermediaries/rows")
+def list_rate_rows(
+    payer_name: str = Query(default=None),
+    intermediary_name: str = Query(default=None),
+    state: str = Query(default=None),
+):
+    conditions = []
+    params = []
+    if payer_name:
+        conditions.append("ir.payer_name = %s")
+        params.append(payer_name)
+    if intermediary_name:
+        conditions.append("i.name = %s")
+        params.append(intermediary_name)
+    if state:
+        conditions.append("ir.state = %s")
+        params.append(state.upper())
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    with get_db() as cur:
+        cur.execute(
+            f"""
+            SELECT ir.rate_id, i.name AS intermediary_name, ir.payer_name,
+                   ir.cpt_code, ir.state, ir.allowed_amount,
+                   ir.effective_date, ir.provider, ir.updated_at
+            FROM intermediary_rates ir
+            JOIN intermediaries i ON ir.intermediary_id = i.intermediary_id
+            {where}
+            ORDER BY i.name, ir.cpt_code, ir.provider
+            """,
+            params,
+        )
+        return cur.fetchall()
+
+
+# ── Explicit-key deletion (added 2026-09-30, Provider Rate Overrides) ──
+# /api/intermediaries/import is an upsert (INSERT ... ON CONFLICT DO
+# UPDATE) and never deletes -- there was no way to remove a row short of
+# a manual SQL DELETE. Added for two related cleanup cases:
+#   1. A group's first per-provider override leaves its old blank/COMMON
+#      row (provider IS NULL) stale in Postgres -- its key never matches
+#      the new per-provider rows, so the upsert never touches it. This is
+#      the route merge_provider_overrides() calls automatically via
+#      push_superseded_deletes() in sync_rates_from_sheets.py.
+#   2. One-off cleanup of rows written under a wrong/orphaned payer_name
+#      before payer_name validation existed -- see
+#      cleanup_orphaned_optum_rows.py (2026-10-01 incident).
+# Deliberately requires the FULL natural key per row (never a broad
+# filter) so a caller has to know precisely what it's removing.
+
+@router.post("/intermediaries/delete-superseded", response_model=DeleteSupersededResponse)
+async def delete_superseded_rows(request: DeleteSupersededRequest):
+    with get_db() as cur:
+        cur.execute("SELECT name, intermediary_id FROM intermediaries WHERE active = TRUE")
+        intermediary_map = {r["name"].strip().lower(): r["intermediary_id"]
+                            for r in cur.fetchall()}
+
+        deleted = 0
+        not_found = 0
+        errors = []
+        for i, key in enumerate(request.keys, start=1):
+            intermediary_id = intermediary_map.get(key.intermediary_name.strip().lower())
+            if not intermediary_id:
+                errors.append(f"Key {i}: unknown intermediary '{key.intermediary_name}'")
+                continue
+            if not key.payer_name or not key.cpt_code or not key.state:
+                errors.append(f"Key {i}: missing payer_name/cpt_code/state — {key}")
+                continue
+
+            provider = (key.provider or "").strip().upper() or None
+
+            cur.execute(
+                """
+                DELETE FROM intermediary_rates
+                WHERE intermediary_id = %s
+                  AND payer_name = %s
+                  AND cpt_code = %s
+                  AND state = %s
+                  AND provider IS NOT DISTINCT FROM %s
+                RETURNING rate_id
+                """,
+                (intermediary_id, key.payer_name.strip(), key.cpt_code.strip(),
+                 key.state.strip().upper(), provider),
+            )
+            rows = cur.fetchall()
+            if rows:
+                deleted += 1
+            else:
+                not_found += 1
+
+    return DeleteSupersededResponse(deleted=deleted, not_found=not_found, errors=errors)
+
+
 # ── Channel Comparison ────────────────────────────────────────
 
 VALID_STATES = {
-    "AK", "AZ", "CO", "DC", "FL", "HI", "ID", "IA", "KS", "ME", "MD",
-    "MN", "MT", "NE", "NV", "NH", "NM", "ND", "OR", "SD", "VT", "WA", "WY",
+    "AK", "AZ", "CO", "CT", "DC", "FL", "HI", "ID", "IA", "KS", "ME", "MD",
+    "MN", "MT", "NE", "NV", "NH", "NM", "ND", "OR", "SD", "UT", "VT", "WA", "WY",
 }
 
 CHANNEL_COMPARISON_SQL = """

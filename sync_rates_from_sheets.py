@@ -105,8 +105,8 @@ PROVIDER_ROSTER = ["JJ", "KR", "LK"]
 API_BASE = "http://localhost:8000/api"
 
 VALID_STATES = {
-    "AK", "AZ", "CO", "DC", "FL", "HI", "ID", "IA", "KS", "ME", "MD",
-    "MN", "MT", "NE", "NV", "NH", "NM", "ND", "OR", "SD", "VT", "WA", "WY",
+    "AK", "AZ", "CO", "CT", "DC", "FL", "HI", "ID", "IA", "KS", "ME", "MD",
+    "MN", "MT", "NE", "NV", "NH", "NM", "ND", "OR", "SD", "UT", "VT", "WA", "WY",
 }
 
 DEFAULT_LOG_PATH = SCRIPT_DIR / "logs" / "rate_sync.log"

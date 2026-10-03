@@ -315,8 +315,8 @@ async def delete_superseded_rows(request: DeleteSupersededRequest):
 # ── Channel Comparison ────────────────────────────────────────
 
 VALID_STATES = {
-    "AK", "AZ", "CO", "DC", "FL", "HI", "ID", "IA", "KS", "ME", "MD",
-    "MN", "MT", "NE", "NV", "NH", "NM", "ND", "OR", "SD", "VT", "WA", "WY",
+    "AK", "AZ", "CO", "CT", "DC", "FL", "HI", "ID", "IA", "KS", "ME", "MD",
+    "MN", "MT", "NE", "NV", "NH", "NM", "ND", "OR", "SD", "UT", "VT", "WA", "WY",
 }
 
 CHANNEL_COMPARISON_SQL = """

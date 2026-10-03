@@ -4,7 +4,7 @@ main.py
 FastAPI entry point for the Solrei CPT Negotiation Helper API.
 
 Run with:
-    cd /Users/deanpedersen/Projects/solrei/CPT_App
+    cd /Users/deanpedersen/projects/solrei/cpt-dashboard
     uvicorn backend.main:app --reload
 
 Then open: http://localhost:8000/docs

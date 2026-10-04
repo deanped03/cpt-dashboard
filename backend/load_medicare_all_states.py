@@ -2,7 +2,7 @@
 load_medicare_all_states.py  (v2 — corrected 2026-07-22)
 ----------------------------------------------------------
 Calculates and loads 2026 Medicare non-facility (telehealth/office) benchmark
-rates for all 23 states where Solrei Behavioral Health has licensed providers.
+rates for all 25 states where Solrei Behavioral Health has licensed providers.
 
 Formula:
     Payment = (Work_RVU x Work_GPCI + PE_RVU x PE_GPCI + MP_RVU x MP_GPCI) x CF
@@ -186,6 +186,7 @@ GPCI = {
     "AK": ("Alaska",                                            1.500,  1.065,   0.551),
     "AZ": ("Arizona (statewide)",                                1.000,  0.969,   0.856),
     "CO": ("Colorado (Denver locality)",                         1.012,  1.064,   0.781),
+    "CT": ("Connecticut (MAC 411201)",                           1.012,  1.065,   0.769),
     "DC": ("Washington DC + MD/VA Suburbs",                      1.054,  1.178,   1.113),
     "FL": ("Florida (Rest of State)",                            1.000,  0.956,   1.503),
     "HI": ("Hawaii, Guam",                                       1.000,  1.137,   0.579),
@@ -203,6 +204,7 @@ GPCI = {
     "ND": ("North Dakota",                                       1.000,  1.000,   0.406),
     "OR": ("Oregon (Rest of Oregon)",                            1.000,  0.996,   0.703),
     "SD": ("South Dakota",                                       1.000,  1.000,   0.336),
+    "UT": ("Utah (MAC 350209)",                                  1.000,  0.939,   0.910),
     "VT": ("Vermont",                                            1.000,  0.990,   0.506),
     "WA": ("Washington (Rest of Washington)",                    1.013,  1.053,   0.761),
     "WY": ("Wyoming",                                            1.000,  1.000,   0.740),
@@ -294,7 +296,7 @@ def main():
     parser.add_argument(
         "--state",
         metavar="XX",
-        help="Load only this state (e.g. --state FL). Default: all 23 states.",
+        help="Load only this state (e.g. --state FL). Default: all 25 states.",
     )
     parser.add_argument(
         "--dry-run",

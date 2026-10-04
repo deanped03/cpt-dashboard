@@ -24,8 +24,8 @@ router = APIRouter(prefix="/api", tags=["Negotiation Dashboard"])
 
 # Valid state codes — the 23 states where Solrei has licensed providers
 VALID_STATES = {
-    "AK","AZ","CO","DC","FL","HI","ID","IA","KS","ME","MD",
-    "MN","MT","NE","NV","NH","NM","ND","OR","SD","VT","WA","WY",
+    "AK","AZ","CO","CT","DC","FL","HI","ID","IA","KS","ME","MD",
+    "MN","MT","NE","NV","NH","NM","ND","OR","SD","UT","VT","WA","WY",
 }
 
 

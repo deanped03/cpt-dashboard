@@ -5,7 +5,7 @@ Pydantic models for request validation and response serialization.
 These match the shapes defined in the api-examples JSON files.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel
@@ -211,6 +211,37 @@ class NegotiationTarget(BaseModel):
     cpt_code: Optional[str]
     target_pct_of_medicare: Decimal
     notes: Optional[str]
+
+
+# ──────────────────────────────────────────────
+# Comprehensive Contract Rate Reference (2026-10-11)
+# Shared server-side store for the dashboard's CSV-driven payer x CPT
+# rate lookup section. Independent of intermediary_rates / SolBoard.
+# ──────────────────────────────────────────────
+
+class ComprehensiveRateIn(BaseModel):
+    payer: str
+    cpt_code: str
+    allowed_amount: Decimal
+    effective_date: Optional[str] = None
+
+
+class ComprehensiveRatesUploadRequest(BaseModel):
+    rows: list[ComprehensiveRateIn]
+
+
+class ComprehensiveRatesUploadResponse(BaseModel):
+    upserted: int
+    message: str
+
+
+class ComprehensiveRate(BaseModel):
+    rate_id: int
+    payer: str
+    cpt_code: str
+    allowed_amount: Decimal
+    effective_date: Optional[str]
+    updated_at: Optional[datetime]
 
 
 # ──────────────────────────────────────────────

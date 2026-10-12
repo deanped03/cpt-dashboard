@@ -627,7 +627,7 @@ mark{background:#E2D19F;border-radius:0;padding:0 1px}
           </div>
         </div>
         <div style="font-size:.7rem;color:#777355;margin-top:8px;">
-          ★ Highlighted rows are codes also tracked in the main dashboard · Rates stored locally in your browser
+          ★ Highlighted rows are codes also tracked in the main dashboard · Rates are stored on the server and shared with every computer on the network
         </div>
 
       </div>
@@ -827,7 +827,7 @@ async function handleSyncRates(btn){
 let selectedState='FL';
 function onStateChange(){const sel=document.getElementById('state-selector');selectedState=sel.value;document.querySelectorAll('.medicare-state-label').forEach(el=>{el.textContent=`Medicare 2026 ${selectedState}`;});loadAll();}
 async function fetchJSON(path){const sep=path.includes('?')?'&':'?';const r=await fetch(`${API}/${path}${sep}state=${selectedState}`);if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);return r.json();}
-async function loadAll(){setStatus('loading');document.getElementById('error-container').innerHTML='';try{const[summary,dashboard]=await Promise.all([fetchJSON('dashboard/summary'),fetchJSON('dashboard')]);summaryData=summary;dashboardData=dashboard;renderCards();renderPayerTable();renderFullTable();setStatus('ok');}catch(e){setStatus('error');document.getElementById('error-container').innerHTML=`<div class="error-msg">⚠️ Could not connect to API. Make sure uvicorn is running: <code>uvicorn backend.main:app --reload</code><br><small>${e.message}</small></div>`;}await loadChannelComparison();syncPayerRateCards();}
+async function loadAll(){setStatus('loading');document.getElementById('error-container').innerHTML='';try{const[summary,dashboard]=await Promise.all([fetchJSON('dashboard/summary'),fetchJSON('dashboard')]);summaryData=summary;dashboardData=dashboard;renderCards();renderPayerTable();renderFullTable();setStatus('ok');}catch(e){setStatus('error');document.getElementById('error-container').innerHTML=`<div class="error-msg">⚠️ Could not connect to API. Make sure uvicorn is running: <code>uvicorn backend.main:app --reload</code><br><small>${e.message}</small></div>`;}await loadChannelComparison();}
 function setStatus(state){const el=document.getElementById('status-badge');el.className='status-badge';if(state==='ok'){el.textContent='● Live';el.className='ok';}else if(state==='error'){el.textContent='● Offline';el.className='error';}else{el.textContent='○ Loading…';el.className='';}el.id='status-badge';}
 function renderCards(){const seenC=new Map();dashboardData.filter(r=>DISPLAY_CPTS.includes(r.cpt_code)).forEach(r=>{const canonical=canonicalizePayer(r.payer_name);const key=`${canonical}|${r.cpt_code}`;if(!seenC.has(key)){seenC.set(key,{...r,payer_name:canonical});}else{const ex=seenC.get(key);if(r.npi_number===JODENE_NPI&&ex.npi_number!==JODENE_NPI)seenC.set(key,{...r,payer_name:canonical});}});const jData=[...seenC.values()];const totalGap=summaryData.reduce((s,r)=>s+(parseFloat(r.total_revenue_gap)||0),0);const totalTarget=summaryData.reduce((s,r)=>s+(parseFloat(r.total_revenue_at_target)||0),0);const totalUnderpaid=jData.filter(r=>r.is_underpaid===true).length;const totalCodes=new Set(jData.map(r=>r.cpt_code)).size;document.getElementById('c-payers').textContent=summaryData.length;document.getElementById('c-codes').textContent=totalCodes;document.getElementById('c-underpaid').textContent=totalUnderpaid;document.getElementById('c-gap').textContent=fmtK(totalGap);document.getElementById('c-target').textContent=fmtK(totalTarget);}
 function renderPayerTable(){const tbody=document.getElementById('payer-tbody');const payerMap=new Map();summaryData.forEach(row=>{const canonical=canonicalizePayer(row.payer_name);if(!payerMap.has(canonical))payerMap.set(canonical,{...row,payer_name:canonical});});tbody.innerHTML=CANONICAL_PAYERS.map(canonical=>{const row=payerMap.get(canonical);if(!row){return`<tr class="payer-row" style="opacity:.4;pointer-events:none;"><td><span class="expand-icon" style="color:#D8D3BF">▶</span></td><td><span class="payer-name" style="color:#D8D3BF">${canonical}</span></td><td class="right" colspan="6" style="color:#D8D3BF;font-size:.78rem;font-style:italic;">No contract data loaded</td><td class="center"></td></tr>`;}const gap=row.total_revenue_gap;const gapFmt=gap?`<strong style="color:#dc2626">${fmtK(gap)}</strong>`:'—';return`<tr class="payer-row" onclick="toggleDrilldown(${row.payer_id},this)" data-payer="${row.payer_id}"><td><span class="expand-icon">▶</span></td><td><span class="payer-name">${canonical}</span></td><td class="right">${row.codes_with_rates??'—'}</td><td class="right">${row.codes_underpaid>0?`<span class="badge badge-red">${row.codes_underpaid}</span>`:`<span class="badge badge-green">0</span>`}</td><td class="right"><div class="pct-bar-wrap"><div class="pct-bar-bg"><div class="pct-bar-fill" style="width:${Math.min(100,(row.avg_pct_of_medicare||0)/1.6)}%;background:${pctColor(row.avg_pct_of_medicare,130)}"></div></div>${pctBadge(row.avg_pct_of_medicare,130)}</div></td><td class="right">${fmtK(row.total_revenue_current)}</td><td class="right">${fmtK(row.total_revenue_at_target)}</td><td class="right">${gapFmt}</td><td class="center" onclick="event.stopPropagation()"><button class="btn btn-sm" onclick="openLetterModal(${row.payer_id},'${canonical}')" style="background:#09371F;">✉ Letter</button><button class="btn btn-sm" onclick="exportCSV(${row.payer_id})" style="margin-top:4px;background:#3D768A;">⬇ CSV</button></td></tr><tr class="drilldown-row" id="drilldown-${row.payer_id}" style="display:none;"><td colspan="8"><div class="drilldown-inner" id="drilldown-inner-${row.payer_id}"><div class="loading">Loading…</div></div></td></tr>`;}).join('');}
@@ -1138,6 +1138,8 @@ const PAYER_CONTRACT_COLORS = {
   'Carelon Behavioral Health':    {accent:'#5009B5',light:'#f4f0fb'},
   'Cigna':                        {accent:'#0982C6',light:'#f0f8fc'},
   'Florida Blue':                 {accent:'#0098D6',light:'#f0f9fd'},
+  'Florida Blue/BCBS':            {accent:'#0098D6',light:'#f0f9fd'},
+  'Wellmark':                     {accent:'#0094D7',light:'#f0f9fd'},
   'Florida Blue Medicare Advantage': {accent:'#0098D6',light:'#f0f9fd'},
   'Horizon BCBS New Jersey':      {accent:'#0094D7',light:'#f0f9fd'},
   'Independence Blue Cross PA':   {accent:'#0094D7',light:'#f0f9fd'},
@@ -1262,44 +1264,108 @@ function initExplorer() {
   document.getElementById('expl-stat-bh').textContent = CPT_CODES.filter(c => c.tag === 'core-bh').length;
   document.getElementById('expl-stat-showing').textContent = CPT_CODES.length;
 
-  loadCompRatesFromStorage();
   explorerFilter();
   buildPayerRateCards();
+  refreshCompRates();
+}
+
+// ── Comprehensive Rate Store (server-side, shared across the LAN) ─────
+// compRates: { [payer]: { [cpt_code]: { allowed_amount, effective_date } } }
+// Stored in Postgres (table comprehensive_rates, /api/comprehensive-rates).
+// ONLY the CSV upload below writes to it — nothing else (no auto-fill from
+// the main negotiation dashboard / SolBoard data).
+let compRates = {};
+
+// The six payers Solrei holds direct contracts with. Deliberately separate
+// from CANONICAL_PAYERS (which drives the main negotiation dashboard).
+// "Florida Blue/BCBS" = Florida Blue plus every other Blue Cross plan that
+// honors the Florida Blue contract. Wellmark is a Blue Cross plan too, but
+// has its own individual contract, so it stays separate.
+const COMP_RATE_PAYERS = [
+  'Aetna',
+  'Ambetter',
+  'Cigna',
+  'Optum/UHC/Oscar',
+  'Florida Blue/BCBS',
+  'Wellmark',
+];
+// Order matters: first match wins. 'wellmark' must come before the generic
+// Blue Cross patterns because Wellmark is itself a Blue Cross plan.
+const _COMP_RATE_ALIAS_KEYS = [
+  ['aetna', 'Aetna'],
+  ['ambetter', 'Ambetter'],
+  ['cigna', 'Cigna'],
+  ['optum/uhc/oscar', 'Optum/UHC/Oscar'],
+  ['uhc / oscar / optum', 'Optum/UHC/Oscar'],
+  ['optum', 'Optum/UHC/Oscar'],
+  ['uhc', 'Optum/UHC/Oscar'],
+  ['oscar', 'Optum/UHC/Oscar'],
+  ['united healthcare', 'Optum/UHC/Oscar'],
+  ['unitedhealthcare', 'Optum/UHC/Oscar'],
+  ['united', 'Optum/UHC/Oscar'],
+  ['wellmark', 'Wellmark'],
+  ['florida blue', 'Florida Blue/BCBS'],
+  ['bcbs', 'Florida Blue/BCBS'],
+  ['blue cross', 'Florida Blue/BCBS'],
+  ['blue shield', 'Florida Blue/BCBS'],
+];
+function canonicalizeCompRatePayer(name) {
+  if (!name) return name;
+  const lower = name.toLowerCase().trim();
+  for (const [key, canonical] of _COMP_RATE_ALIAS_KEYS) {
+    if (lower.includes(key)) return canonical;
+  }
+  return name.trim();
+}
+
+async function fetchCompRates() {
+  try {
+    const res = await fetch(API + '/comprehensive-rates');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = await res.json();
+    const next = {};
+    rows.forEach(r => {
+      if (!next[r.payer]) next[r.payer] = {};
+      next[r.payer][r.cpt_code] = {
+        allowed_amount: Number(r.allowed_amount),
+        effective_date: r.effective_date || ''
+      };
+    });
+    compRates = next;
+  } catch(e) {
+    compRates = {};
+  }
+}
+
+async function refreshCompRates() {
+  await fetchCompRates();
   buildCompRatePayerTabs();
   renderCompRateTable();
   updateCompRateSummary();
 }
 
-// ── Comprehensive Rate Store (localStorage) ──────────────────────────
-// compRates: { [payer]: { [cpt_code]: { allowed_amount, effective_date } } }
-let compRates = {};
-const COMP_RATES_KEY = 'solrei_comp_rates_v1';
-
-function loadCompRatesFromStorage() {
+async function clearCompRates() {
+  if (!confirm('Clear all comprehensive rate data for EVERYONE on the network? This cannot be undone.')) return;
+  const statusEl = document.getElementById('comp-rate-upload-status');
   try {
-    const raw = localStorage.getItem(COMP_RATES_KEY);
-    compRates = raw ? JSON.parse(raw) : {};
-  } catch(e) { compRates = {}; }
-}
-
-function saveCompRatesToStorage() {
-  try { localStorage.setItem(COMP_RATES_KEY, JSON.stringify(compRates)); } catch(e) {}
-}
-
-function clearCompRates() {
-  if (!confirm('Clear all comprehensive rate data? This cannot be undone.')) return;
+    const res = await fetch(API + '/comprehensive-rates', { method: 'DELETE' });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+  } catch(err) {
+    statusEl.className = 'comp-rate-upload-status error';
+    statusEl.textContent = '✗ Could not clear rates: ' + err.message;
+    return;
+  }
   compRates = {};
-  saveCompRatesToStorage();
   renderCompRateTable();
   buildCompRatePayerTabs();
   document.getElementById('comp-rate-summary').style.display = 'none';
-  document.getElementById('comp-rate-upload-status').className = 'comp-rate-upload-status';
+  statusEl.className = 'comp-rate-upload-status';
 }
 
 // ── CSV template download ─────────────────────────────────────────────
 function downloadCompRateTemplate() {
   const header = 'payer,cpt_code,allowed_amount,effective_date\n';
-  const rows = CANONICAL_PAYERS.flatMap(payer =>
+  const rows = COMP_RATE_PAYERS.flatMap(payer =>
     CPT_CODES.map(c => payer + ',' + c.code + ',,')
   ).join('\n');
   const blob = new Blob([header + rows], {type:'text/csv'});
@@ -1326,7 +1392,7 @@ function uploadCompRates(file) {
   statusEl.textContent = '⏳ Parsing ' + file.name + '…';
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     try {
       const lines = e.target.result.split(/\r?\n/).filter(l => l.trim());
       if (!lines.length) throw new Error('File is empty');
@@ -1341,29 +1407,47 @@ function uploadCompRates(file) {
 
       if (iP < 0 || iC < 0 || iA < 0) throw new Error('CSV must have columns: payer, cpt_code, allowed_amount');
 
-      let loaded = 0, skipped = 0;
-      const newRates = JSON.parse(JSON.stringify(compRates)); // clone
+      const uploadRows = [];
+      const unknownPayers = new Set();
+      let skipped = 0;
 
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',').map(s => s.trim().replace(/^"|"$/g,''));
-        const payer = canonicalizePayer(cols[iP]);
+        const payer = canonicalizeCompRatePayer(cols[iP]);
         const code = (cols[iC] || '').toUpperCase().trim();
         const amount = parseFloat(cols[iA]);
         const date = iD > -1 ? cols[iD] : '';
 
         if (!payer || !code || isNaN(amount) || amount <= 0) { skipped++; continue; }
 
-        if (!newRates[payer]) newRates[payer] = {};
-        newRates[payer][code] = { allowed_amount: amount, effective_date: date };
-        loaded++;
+        // Only the six contracted payers are accepted; anything else would
+        // be stored but never shown, so reject it loudly instead.
+        if (!COMP_RATE_PAYERS.includes(payer)) { unknownPayers.add(cols[iP]); skipped++; continue; }
+
+        uploadRows.push({ payer, cpt_code: code, allowed_amount: amount, effective_date: date || null });
       }
 
-      compRates = newRates;
-      saveCompRatesToStorage();
+      if (!uploadRows.length) {
+        throw new Error('No valid rows to upload' +
+          (unknownPayers.size ? ' — unrecognized payer(s): ' + [...unknownPayers].join(', ') +
+          '. Allowed: ' + COMP_RATE_PAYERS.join(', ') : ''));
+      }
 
+      statusEl.textContent = '⏳ Uploading ' + uploadRows.length + ' rate(s)…';
+      const res = await fetch(API + '/comprehensive-rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: uploadRows })
+      });
+      if (!res.ok) throw new Error('Server rejected the upload (HTTP ' + res.status + ')');
+
+      await fetchCompRates();
+
+      const loaded = uploadRows.length;
       statusEl.className = 'comp-rate-upload-status success';
       statusEl.textContent = '✓ Loaded ' + loaded + ' rate' + (loaded !== 1 ? 's' : '') +
-        (skipped ? ' · ' + skipped + ' rows skipped (blank or invalid)' : '');
+        (skipped ? ' · ' + skipped + ' rows skipped (blank, invalid, or unrecognized payer' +
+          (unknownPayers.size ? ': ' + [...unknownPayers].join(', ') : '') + ')' : '');
 
       buildCompRatePayerTabs();
       renderCompRateTable();
@@ -1383,7 +1467,7 @@ let compRateActivePayer = null;
 
 function buildCompRatePayerTabs() {
   const bar = document.getElementById('comp-rate-payer-tabs');
-  const payersWithData = CANONICAL_PAYERS.filter(p => compRates[p] && Object.keys(compRates[p]).length > 0);
+  const payersWithData = COMP_RATE_PAYERS.filter(p => compRates[p] && Object.keys(compRates[p]).length > 0);
   if (!payersWithData.length) { bar.innerHTML = ''; return; }
 
   // Default to first payer with data
@@ -1425,7 +1509,7 @@ function renderCompRateTable() {
   const q = (document.getElementById('comp-rate-search').value || '').toLowerCase().trim();
   const payer = compRateActivePayer;
 
-  const totalPayers = CANONICAL_PAYERS.filter(p => compRates[p] && Object.keys(compRates[p]).length).length;
+  const totalPayers = COMP_RATE_PAYERS.filter(p => compRates[p] && Object.keys(compRates[p]).length).length;
   if (!totalPayers) {
     wrap.innerHTML = `<div class="comp-rate-empty">No comprehensive rates loaded yet.<br><span style="font-size:.78rem;">Download the template above, fill in your contracted rates, and upload.</span></div>`;
     return;
@@ -1520,11 +1604,10 @@ function toggleNoRateRows() {
 
 function updateCompRateSummary() {
   const summaryEl = document.getElementById('comp-rate-summary');
-  const payersWithData = CANONICAL_PAYERS.filter(p => compRates[p] && Object.keys(compRates[p]).length);
+  const payersWithData = COMP_RATE_PAYERS.filter(p => compRates[p] && Object.keys(compRates[p]).length);
   if (!payersWithData.length) { summaryEl.style.display = 'none'; return; }
 
   const totalRates = payersWithData.reduce((sum, p) => sum + Object.keys(compRates[p]).length, 0);
-  const lastUpload = localStorage.getItem(COMP_RATES_KEY + '_date') || 'unknown';
 
   summaryEl.style.display = 'flex';
   summaryEl.innerHTML = `
@@ -1532,36 +1615,10 @@ function updateCompRateSummary() {
     <div class="comp-rate-stat"><span>${totalRates}</span> total rates</div>
     <div class="comp-rate-stat"><span>${payersWithData.map(p => Object.keys(compRates[p]).length + ' ' + p.split(' ')[0]).join(' · ')}</span></div>
   `;
-  localStorage.setItem(COMP_RATES_KEY + '_date', new Date().toLocaleDateString());
 }
 
 // ── Keep old buildPayerRateCards (now unused, kept for compat) ────────
 function buildPayerRateCards() { /* replaced by comprehensive rate table */ }
-
-function syncPayerRateCards() {
-  // Merge dashboard API rates into comprehensive rate store (does NOT overwrite uploaded rates)
-  if (!dashboardData.length) return;
-  let changed = false;
-  CANONICAL_PAYERS.forEach(payer => {
-    CORE_DASHBOARD_CPTS.forEach(code => {
-      const match = dashboardData.find(r => canonicalizePayer(r.payer_name) === payer && r.cpt_code === code);
-      if (match && match.payer_allowed != null) {
-        if (!compRates[payer]) compRates[payer] = {};
-        // Only set if not already present from a CSV upload (CSV upload takes priority)
-        if (!compRates[payer][code]) {
-          compRates[payer][code] = { allowed_amount: match.payer_allowed, effective_date: '' };
-          changed = true;
-        }
-      }
-    });
-  });
-  if (changed) {
-    saveCompRatesToStorage();
-    buildCompRatePayerTabs();
-    renderCompRateTable();
-    updateCompRateSummary();
-  }
-}
 
 // ── Boot ──────────────────────────────────────────────────────────
 initExplorer();

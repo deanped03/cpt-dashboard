@@ -1289,6 +1289,105 @@ const COMP_RATE_PAYERS = [
   'Florida Blue/BCBS',
   'Wellmark',
 ];
+// The exact CPT/HCPCS codes shown in the Comprehensive Contract Rate
+// Reference, in display order. Identical for all six payers. Uploaded rows
+// for any other code are skipped (and reported) so nothing is stored that
+// the table cannot show. Descriptions come from CPT_CODES; the few codes
+// below that are not in that list have their own description here.
+const COMP_RATE_CODES = [
+  '90785',
+  '90791',
+  '90792',
+  '90832',
+  '90833',
+  '90834',
+  '90836',
+  '90837',
+  '90838',
+  '90839',
+  '90840',
+  '90845',
+  '90846',
+  '90847',
+  '90849',
+  '90853',
+  '96116',
+  '96121',
+  '96130',
+  '96131',
+  '96132',
+  '96133',
+  '96136',
+  '96137',
+  '96138',
+  '96139',
+  '96146',
+  '96156',
+  '96158',
+  '96159',
+  '96164',
+  '96165',
+  '96167',
+  '96168',
+  '96170',
+  '96171',
+  '96202',
+  '96203',
+  '99202',
+  '99203',
+  '99204',
+  '99205',
+  '99211',
+  '99212',
+  '99213',
+  '99214',
+  '99215',
+  '99401',
+  '99402',
+  '99403',
+  '99404',
+  '99406',
+  '99407',
+  '99408',
+  '99409',
+  '99417',
+  '99421',
+  '99422',
+  '99423',
+  '99446',
+  '99447',
+  '99448',
+  '99449',
+  '99451',
+  '99452',
+  'G2082',
+  'G2083',
+  'G2086',
+  'G2087',
+  'G2088',
+  'G2211',
+  'G2212',
+  'G2213',
+];
+const COMP_RATE_CODE_SET = new Set(COMP_RATE_CODES);
+const COMP_RATE_EXTRA_DESC = {
+  '90845': 'Psychoanalysis',
+  '96202': 'Parent/guardian group training (multiple-family), first 60 min',
+  '96203': 'Parent/guardian group training (multiple-family), each additional 15 min',
+  'G2082': 'Outpatient E/M requiring esketamine supervision, 56 min or less',
+  'G2083': 'Outpatient E/M requiring esketamine supervision, more than 56 min',
+  'G2086': 'Office-based opioid treatment, first calendar month',
+  'G2087': 'Office-based opioid treatment, subsequent month',
+  'G2088': 'Office-based opioid treatment, each additional 30 min',
+  'G2211': 'Visit complexity add-on to office/outpatient E/M',
+  'G2212': 'Prolonged office/outpatient E/M beyond maximum time, each 15 min (Medicare)',
+  'G2213': 'HCPCS G2213 (description to be confirmed)',
+};
+function compRateCodeDesc(code) {
+  const c = CPT_CODES.find(x => x.code === code);
+  return c ? c.short : (COMP_RATE_EXTRA_DESC[code] || '');
+}
+
 // Order matters: first match wins. 'wellmark' must come before the generic
 // Blue Cross patterns because Wellmark is itself a Blue Cross plan.
 const _COMP_RATE_ALIAS_KEYS = [
@@ -1366,7 +1465,7 @@ async function clearCompRates() {
 function downloadCompRateTemplate() {
   const header = 'payer,cpt_code,allowed_amount,effective_date\n';
   const rows = COMP_RATE_PAYERS.flatMap(payer =>
-    CPT_CODES.map(c => payer + ',' + c.code + ',,')
+    COMP_RATE_CODES.map(code => payer + ',' + code + ',,')
   ).join('\n');
   const blob = new Blob([header + rows], {type:'text/csv'});
   const a = document.createElement('a');
@@ -1385,6 +1484,27 @@ function compDrop(e) {
   if (file) uploadCompRates(file);
 }
 
+// Quote-aware CSV line split ("Individual psychotherapy, 30 min" stays one cell)
+function parseCsvLine(line) {
+  const out = []; let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') inQ = false;
+      else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { out.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+// "$1,234.50" -> 1234.5 ; blank/garbage -> NaN
+function parseCompAmount(v) {
+  return parseFloat(String(v == null ? '' : v).replace(/[$,\s]/g, ''));
+}
+
 function uploadCompRates(file) {
   if (!file) return;
   const statusEl = document.getElementById('comp-rate-upload-status');
@@ -1398,7 +1518,7 @@ function uploadCompRates(file) {
       if (!lines.length) throw new Error('File is empty');
 
       // Parse header — flexible column order
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z_]/g,''));
+      const headers = parseCsvLine(lines[0]).map(h => h.trim().toLowerCase().replace(/[^a-z_]/g,''));
       const col = (names) => { for (const n of names) { const i = headers.indexOf(n); if (i > -1) return i; } return -1; };
       const iP = col(['payer','payer_name','insurance','carrier']);
       const iC = col(['cpt_code','cpt','code']);
@@ -1409,28 +1529,45 @@ function uploadCompRates(file) {
 
       const uploadRows = [];
       const unknownPayers = new Set();
+      const why = { missing: 0, amount: 0, payer: 0, code: 0 };
+      const unknownCodes = new Set();
+      let firstBad = '';
       let skipped = 0;
 
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',').map(s => s.trim().replace(/^"|"$/g,''));
+        const cols = parseCsvLine(lines[i]);
         const payer = canonicalizeCompRatePayer(cols[iP]);
         const code = (cols[iC] || '').toUpperCase().trim();
-        const amount = parseFloat(cols[iA]);
+        const amountRaw = cols[iA];
+        const amount = parseCompAmount(amountRaw);
         const date = iD > -1 ? cols[iD] : '';
 
-        if (!payer || !code || isNaN(amount) || amount <= 0) { skipped++; continue; }
+        if (!payer || !code) { why.missing++; skipped++; if (!firstBad) firstBad = 'row ' + (i+1) + ': payer or cpt_code is empty'; continue; }
+        if (isNaN(amount) || amount <= 0) {
+          // A blank rate is normal in the template (codes you have no rate for) — skip quietly
+          why.amount++; skipped++;
+          if (!firstBad && String(amountRaw || '').trim()) firstBad = 'row ' + (i+1) + ': allowed_amount "' + amountRaw + '" is not a positive number';
+          continue;
+        }
 
         // Only the six contracted payers are accepted; anything else would
         // be stored but never shown, so reject it loudly instead.
-        if (!COMP_RATE_PAYERS.includes(payer)) { unknownPayers.add(cols[iP]); skipped++; continue; }
+        if (!COMP_RATE_PAYERS.includes(payer)) { unknownPayers.add(cols[iP]); why.payer++; skipped++; continue; }
+
+        if (!COMP_RATE_CODE_SET.has(code)) { unknownCodes.add(code); why.code++; skipped++; continue; }
 
         uploadRows.push({ payer, cpt_code: code, allowed_amount: amount, effective_date: date || null });
       }
 
       if (!uploadRows.length) {
-        throw new Error('No valid rows to upload' +
-          (unknownPayers.size ? ' — unrecognized payer(s): ' + [...unknownPayers].join(', ') +
-          '. Allowed: ' + COMP_RATE_PAYERS.join(', ') : ''));
+        const parts = [];
+        if (why.amount) parts.push(why.amount + ' row(s) with a blank or non-numeric allowed_amount');
+        if (why.missing) parts.push(why.missing + ' row(s) with an empty payer or cpt_code');
+        if (why.code) parts.push(why.code + ' row(s) with a code not on the allowed list (' + [...unknownCodes].slice(0,8).join(', ') + (unknownCodes.size > 8 ? ', …' : '') + ')');
+        if (why.payer) parts.push(why.payer + ' row(s) with an unrecognized payer (' + [...unknownPayers].join(', ') + '; allowed: ' + COMP_RATE_PAYERS.join(', ') + ')');
+        throw new Error('No valid rows to upload — ' + (lines.length - 1) + ' data row(s) read: ' + (parts.join('; ') || 'none') +
+          (firstBad ? '. First problem — ' + firstBad : '') +
+          '. Detected columns: payer=' + (iP+1) + ', cpt_code=' + (iC+1) + ', allowed_amount=' + (iA+1) + '.');
       }
 
       statusEl.textContent = '⏳ Uploading ' + uploadRows.length + ' rate(s)…';
@@ -1446,8 +1583,9 @@ function uploadCompRates(file) {
       const loaded = uploadRows.length;
       statusEl.className = 'comp-rate-upload-status success';
       statusEl.textContent = '✓ Loaded ' + loaded + ' rate' + (loaded !== 1 ? 's' : '') +
-        (skipped ? ' · ' + skipped + ' rows skipped (blank, invalid, or unrecognized payer' +
-          (unknownPayers.size ? ': ' + [...unknownPayers].join(', ') : '') + ')' : '');
+        (skipped ? ' · ' + skipped + ' rows skipped (blank, invalid, unrecognized payer' +
+          (unknownPayers.size ? ' [' + [...unknownPayers].join(', ') + ']' : '') + ', or code not on the list' +
+          (unknownCodes.size ? ' [' + [...unknownCodes].slice(0,8).join(', ') + (unknownCodes.size > 8 ? ', …' : '') + ']' : '') + ')' : '');
 
       buildCompRatePayerTabs();
       renderCompRateTable();
@@ -1519,75 +1657,39 @@ function renderCompRateTable() {
     return;
   }
 
-  const pal = PAYER_CONTRACT_COLORS[payer] || {accent:'#3D768A',light:'#f3f7f8'};
   const payerRates = compRates[payer] || {};
-
-  // Build rows: all CPT_CODES ordered by category, filtered by search
-  let rows = CPT_CODES.filter(c => {
-    if (!q) return true;
-    return (c.code + ' ' + c.short + ' ' + c.desc + ' ' + c.cat + ' ' + c.keywords).toLowerCase().includes(q);
-  });
-
-  // Sort: codes with rates first (by category), then codes without rates
-  const withRate = rows.filter(c => payerRates[c.code] != null);
-  const withoutRate = rows.filter(c => payerRates[c.code] == null);
-
-  // Group with-rate rows by category
-  const cats = [...new Set(withRate.map(c => c.cat))];
-  const grouped = cats.map(cat => withRate.filter(c => c.cat === cat));
-
   const fmt$ = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+  const escHtml = v => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  let tableRows = '';
-
-  // Rows WITH rates — grouped by category
-  cats.forEach((cat, gi) => {
-    const catRows = grouped[gi];
-    tableRows += `<tr><td colspan="5" style="background:#ede9fe;padding:5px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#5b21b6;border-bottom:1px solid #ddd6fe;">${cat} <span style="opacity:.6;">(${catRows.length})</span></td></tr>`;
-    catRows.forEach(c => {
-      const rateData = payerRates[c.code];
-      const isCore = CORE_DASHBOARD_CPTS.includes(c.code);
-      const effDate = rateData.effective_date ? `<span style="font-size:.65rem;color:#777355;display:block;">${rateData.effective_date}</span>` : '';
-      tableRows += `<tr class="${isCore ? 'is-core' : ''}">
-        <td class="crt-code">${c.code}${isCore ? ' <span style="font-size:.6rem;color:#065F46;">★</span>' : ''}</td>
-        <td><div class="crt-short">${c.short}</div><div class="crt-cat">${c.sub}</div></td>
-        <td style="font-size:.7rem;color:#777355;white-space:nowrap;">${c.tag}</td>
-        <td class="right">${fmt$(rateData.allowed_amount)}${effDate}</td>
-      </tr>`;
-    });
+  // One flat list, always the same codes in the same order for every payer.
+  const codes = COMP_RATE_CODES.filter(code => {
+    if (!q) return true;
+    return (code + ' ' + compRateCodeDesc(code)).toLowerCase().includes(q);
   });
 
-  // Rows WITHOUT rates (dimmed, collapsed) — only show if no search query
-  if (!q && withoutRate.length) {
-    tableRows += `<tr id="no-rate-toggle-row"><td colspan="5" style="padding:8px 12px;background:#FBFBF3;border-top:1px solid #D8D3BF;">
-      <button onclick="toggleNoRateRows()" style="background:none;border:none;color:#777355;font-size:.73rem;cursor:pointer;font-weight:600;">
-        ▸ Show ${withoutRate.length} codes with no rate loaded
-      </button></td></tr>`;
-    tableRows += `<tbody id="no-rate-rows" style="display:none;">`;
-    withoutRate.forEach(c => {
-      tableRows += `<tr style="opacity:.45;">
-        <td class="crt-code">${c.code}</td>
-        <td><div class="crt-short">${c.short}</div><div class="crt-cat">${c.sub}</div></td>
-        <td style="font-size:.7rem;color:#777355;">${c.tag}</td>
-        <td class="missing">—</td>
-      </tr>`;
-    });
-    tableRows += `</tbody>`;
-  }
-
-  if (!tableRows && q) {
-    wrap.innerHTML = `<div class="comp-rate-empty">No codes match "${q}".</div>`;
+  if (!codes.length) {
+    wrap.innerHTML = `<div class="comp-rate-empty">No codes match "${escHtml(q)}".</div>`;
     return;
   }
 
+  const rowsHtml = codes.map(code => {
+    const rateData = payerRates[code];
+    const isCore = CORE_DASHBOARD_CPTS.includes(code);
+    const effDate = rateData && rateData.effective_date ? `<span style="font-size:.65rem;color:#777355;display:block;">${escHtml(rateData.effective_date)}</span>` : '';
+    return `<tr class="${isCore ? 'is-core' : ''}"${rateData ? '' : ' style="opacity:.55;"'}>
+      <td class="crt-code">${escHtml(code)}${isCore ? ' <span style="font-size:.6rem;color:#065F46;">★</span>' : ''}</td>
+      <td><div class="crt-short">${escHtml(compRateCodeDesc(code))}</div></td>
+      <td class="${rateData ? 'right' : 'right missing'}">${rateData ? fmt$(rateData.allowed_amount) + effDate : '—'}</td>
+    </tr>`;
+  }).join('');
+
   wrap.innerHTML = `<table class="comp-rate-table">
     <thead><tr>
-      <th style="width:80px;">CPT Code</th>
+      <th style="width:90px;">CPT Code</th>
       <th>Description</th>
-      <th style="width:100px;">Type</th>
-      <th class="right" style="width:110px;">Contracted Rate</th>
+      <th class="right" style="width:130px;">Contracted Rate</th>
     </tr></thead>
-    <tbody>${tableRows}</tbody>
+    <tbody>${rowsHtml}</tbody>
   </table>`;
 }
 
